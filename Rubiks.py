@@ -3,6 +3,11 @@ import random
 from ursina import Button, color
 
 app = Ursina()
+pivot = None
+leftButtonIsDown = False
+totalAngle = [0,0,0]  # Tracks angle around x-, y-, or z-axis resp.
+speed = 200 # Degrees per unit dragged by mouse
+dragDir = None
 
 # 1. THE CUBIE CLASS
 class Cubie(Entity):
@@ -48,96 +53,141 @@ for x in range(-1, 2):
             cubies.append(Cubie(x, y, z))
 
 # 3. THE ROTATION ENGINE
-pivot = Entity()
-
-def rotate_slice(axis, layer, angle):
+def setPivot(axis,layer,dir):
+    global pivot
+    pivot = Entity()
+    pivot.axis=axis
+    pivot.dir=dir
     pivot.rotation = (0,0,0)
     for c in cubies:
         c.world_parent = scene
-        # Logic: Is this cubie in the slice we want to move?
         if abs(getattr(c, axis) - layer) < 0.1:
             c.world_parent = pivot
 
+def rotatePivot(angle):
+    global pivot, totalAngle
     # Animate the rotation
-    if axis == 'x': 
-        pivot.animate_rotation_x(angle, duration=0.15, curve=curve.linear)
-    elif axis == 'y': 
-        pivot.animate_rotation_y(angle, duration=0.15, curve=curve.linear)
-    elif axis == 'z': 
-        pivot.animate_rotation_z(angle, duration=0.15, curve=curve.linear)
-    
-    # CRITICAL: Snap to perfect integers after rotation
-    invoke(snap_to_grid, delay=0.25)
+    change = angle*pivot.dir
+    if pivot.axis == 'x': 
+        pivot.rotation += (change,0,0)
+        totalAngle[0] += change
+    elif pivot.axis == 'y': 
+        pivot.rotation += (0,change,0)
+        totalAngle[1] += change
+    elif pivot.axis == 'z': 
+        pivot.rotation += (0,0,change)
+        totalAngle[2] += change
 
-def snap_to_grid():
+def animatedRotatePivot(angle):
+    if pivot.axis == 'x':
+        pivot.animate_rotation_x(pivot.rotation_x+angle*pivot.dir,
+                                 duration=0.15, curve=curve.linear)
+    if pivot.axis == 'y': 
+        pivot.animate_rotation_y(pivot.rotation_y+angle*pivot.dir,
+                                 duration=0.15, curve=curve.linear)
+    if pivot.axis == 'z': 
+        pivot.animate_rotation_z(pivot.rotation_z+angle*pivot.dir,
+                                 duration=0.15, curve=curve.linear)
+
+
+def resetPivot():
+    global pivot, totalAngle
+    if totalAngle[0]:
+        pivot.animate_rotation_x(round(totalAngle[0]/90)*90,
+                                 duration=0.15, curve=curve.linear)
+    if totalAngle[1]: 
+        pivot.animate_rotation_y(round(totalAngle[1]/90)*90,
+                                 duration=0.15, curve=curve.linear)
+    if totalAngle[2]: 
+        pivot.animate_rotation_z(round(totalAngle[2]/90)*90,
+                                 duration=0.15, curve=curve.linear)
+    totalAngle = [0,0,0]
+    invoke(resetCubies, delay=0.16)
+
+def resetCubies():
+    global pivot
     for c in cubies:
         c.world_parent = scene
-        # Round the positions and rotations to keep the math "clean"
         c.position = (round(c.x), round(c.y), round(c.z))
         c.rotation = (round(c.rotation_x/90)*90, 
                       round(c.rotation_y/90)*90, 
                       round(c.rotation_z/90)*90)
-
+    pivot = None
 
 # 4. Mouse controls
 DIR_MAP = {
     'z': [ # Hit Front/Back: Can move along X or Y
-        (Vec3(1,0,0),  'y', 'y',  90), # Move Right -> Rotate Y-axis
-        (Vec3(-1,0,0), 'y', 'y', -90), # Move Left  -> Rotate Y-axis
-        (Vec3(0,1,0),  'x', 'x', -90), # Move Up    -> Rotate X-axis
-        (Vec3(0,-1,0), 'x', 'x',  90)  # Move Down  -> Rotate X-axis
+        (Vec3(1,0,0),  'y', -1), # Move Right -> Rotate Y-axis
+        (Vec3(-1,0,0), 'y',  1), # Move Left  -> Rotate Y-axis
+        (Vec3(0,1,0),  'x',  1), # Move Up    -> Rotate X-axis
+        (Vec3(0,-1,0), 'x', -1)  # Move Down  -> Rotate X-axis
     ],
     'x': [ # Hit Sides: Can move along Y or Z
-        (Vec3(0,1,0),  'z', 'z', -90), # Move Up    -> Rotate Z-axis
-        (Vec3(0,-1,0), 'z', 'z',  90), # Move Down  -> Rotate Z-axis
-        (Vec3(0,0,1),  'y', 'y', -90), # Move "Right"(Z+) -> Rotate Y-axis
-        (Vec3(0,0,-1), 'y', 'y',  90)  # Move "Left"(Z-)  -> Rotate Y-axis
+        (Vec3(0,1,0),  'z',  1), # Move Up    -> Rotate Z-axis
+        (Vec3(0,-1,0), 'z', -1), # Move Down  -> Rotate Z-axis
+        (Vec3(0,0,1),  'y', 1), # Move "Right"(Z+) -> Rotate Y-axis
+        (Vec3(0,0,-1), 'y',  -1)  # Move "Left"(Z-)  -> Rotate Y-axis
     ],
     'y': [ # Hit Top/Bottom: Can move along X or Z
-        (Vec3(1,0,0),  'z', 'z',  90), # Move Right -> Rotate Z-axis
-        (Vec3(-1,0,0), 'z', 'z', -90), # Move Left  -> Rotate Z-axis
-        (Vec3(0,0,1),  'x', 'x',  90), # Move Up(Z+) -> Rotate X-axis
-        (Vec3(0,0,-1), 'x', 'x', -90)  # Move Down(Z-) -> Rotate X-axis
+        (Vec3(1,0,0),  'z', -1), # Move Right -> Rotate Z-axis
+        (Vec3(-1,0,0), 'z',  1), # Move Left  -> Rotate Z-axis
+        (Vec3(0,0,1),  'x', -1), # Move Up(Z+) -> Rotate X-axis
+        (Vec3(0,0,-1), 'x',  1)  # Move Down(Z-) -> Rotate X-axis
     ]
 }
 
+start_world_point = None
 start_mouse_pos = None
 current_targets = []
 
 def input(key):
-    global start_mouse_pos, current_targets
+    global start_world_point, start_mouse_pos, dragDir
+    global current_targets, leftButtonIsDown
 
     if key == 'left mouse down' and mouse.hovered_entity:
-        sticker = mouse.hovered_entity
-        cubie = sticker.parent
+        leftButtonIsDown = True
+        face = mouse.hovered_entity
+        cubie = face.parent
         
         # 1. Identify which coordinate is non-zero (The Face ID)
-        lp = sticker.world_position - cubie.world_position
+        lp = face.world_position - cubie.world_position
         face_axis = 'x' if abs(lp.x) > 0.1 else ('y' if abs(lp.y) > 0.1 else 'z')
         
         # 2. Build the 4 targets around the cubie's world center
-        anchor = cubie.world_position
-        start_mouse_pos = mouse.world_point
         current_targets = []
-        for offset, rot_axis, layer_attr, angle in DIR_MAP[face_axis]:
-            target_pos = anchor + offset
-            angle = angle if getattr(cubie, face_axis) > 0 else -angle
-            # Store (Target World Pos, Rotation Axis, Layer Coordinate, Angle)
-            current_targets.append((target_pos, rot_axis, getattr(cubie, layer_attr), angle))
+        start_world_point = mouse.world_point
+        start_mouse_pos = mouse.position
+        for offset, rot_axis, dir in DIR_MAP[face_axis]:
+            # Store (Target World Pos, Rotation Axis, Layer Coordinate)
+            current_targets.append((offset,rot_axis,
+                                    getattr(cubie, rot_axis),
+                                    dir*getattr(cubie, face_axis)))
 
-    if key == 'left mouse up' and start_mouse_pos and mouse.world_point:
-        # 3. Check if the user actually dragged a minimum distance
-        if distance(start_mouse_pos, mouse.world_point) > 0.1:
-            
-            # 4. Find the closest target point to where the mouse is now
-            # winner looks like: (pos, axis, layer, angle)
-            winner = min(current_targets, key=lambda t: distance(t[0], mouse.world_point))
-            # 5. Execute the rotation
-            rotate_slice(winner[1], round(winner[2]), winner[3])
-            
+    if key == 'left mouse up': 
         # Reset for next click
+        leftButtonIsDown = False
         start_mouse_pos = None
+        start_world_point = None
+        dragDir = None
         current_targets = []
+        resetPivot()
+
+def update():
+    global start_mouse_pos, dragDir, start_world_point
+    if leftButtonIsDown:
+        if not pivot and mouse.world_point:
+            mouse_change = distance(start_world_point, mouse.world_point)
+            if  mouse_change>.05 and distance(mouse.position,start_mouse_pos)>.05:
+                winner = min(current_targets, key=lambda t: distance(t[0],start_world_point - mouse.world_point))
+                setPivot(winner[1],round(winner[2]),winner[3])
+                dragDir = mouse.position-start_mouse_pos
+                dragDir = dragDir / distance((0,0,0),dragDir)
+        elif dragDir:
+            mouse_change = dragDir.dot(mouse.position-start_mouse_pos)
+            if abs(mouse_change)>.01:
+                rotatePivot(mouse_change*speed)
+                start_mouse_pos = mouse.position
+
 
 # Shuffling the cube with a random sequence of moves
 sequence = []
@@ -162,7 +212,8 @@ def run_next_move():
     ax, lay, ang = sequence.pop(0)
     
     # Execute the move
-    rotate_slice(ax, lay, ang)
+    setPivot(ax,lay,1)
+    animatedRotatePivot(ang)
     
     # WAIT for the animation duration (0.2s) + cleanup (0.05s)
     # then call this function again for the next move
