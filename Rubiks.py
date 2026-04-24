@@ -8,6 +8,7 @@ leftButtonIsDown = False
 totalAngle = [0,0,0]  # Tracks angle around x-, y-, or z-axis resp.
 speed = 200 # Degrees per unit dragged by mouse
 dragDir = None
+shuffling = False # For disabling actions while shuffling
 
 # 1. THE CUBIE CLASS
 class Cubie(Entity):
@@ -143,7 +144,7 @@ current_targets = []
 def input(key):
     global start_world_point, start_mouse_pos, dragDir
     global current_targets, leftButtonIsDown
-
+    if shuffling: return # Ignore all actions while shuffling
     if key == 'left mouse down' and mouse.hovered_entity:
         leftButtonIsDown = True
         face = mouse.hovered_entity
@@ -174,6 +175,7 @@ def input(key):
 
 def update():
     global start_mouse_pos, dragDir, start_world_point
+    if shuffling: return # Ignore all actions while shuffling
     if leftButtonIsDown:
         if not pivot and mouse.world_point:
             mouse_change = distance(start_world_point, mouse.world_point)
@@ -193,8 +195,10 @@ def update():
 sequence = []
 
 def shuffle_cube(steps=20):
-    global sequence
-    # Generate 20 random move instructions
+    global sequence, shuffling
+    if shuffling: return # Ignore all actions while shuffling
+
+    shuffling = True
     axes = ['x', 'y', 'z']
     layers = [-1, 0, 1]
     angles = [90, -90]
@@ -205,7 +209,9 @@ def shuffle_cube(steps=20):
     run_next_move()
 
 def run_next_move():
+    global shuffling
     if not sequence:
+        shuffling = False
         return # We are done!
 
     # Pull the first move out of the list
@@ -228,6 +234,30 @@ shuffle_btn = Button(
     on_click=shuffle_cube
 )
 
+def flip_cube():
+    global cubies, pivot
+    if shuffling: return # Ignore all actions while shuffling
+    # Rotate 180 degrees around the X axis
+    # We use animate_rotation for a smooth transition
+    pivot = Entity()
+    for c in cubies:
+        c.world_parent = pivot
+    pivot.axis = 'x'
+    pivot.dir = 1
+    animatedRotatePivot(180)
+    invoke(resetCubies, delay=.6)
+
+# UI Button to trigger the flip
+flip_button = Button(
+    text='Flip Cube', 
+    color=color.azure, 
+    scale=(0.15, 0.05), 
+    y=-0.4, 
+    on_click=flip_cube
+)
+
 cam = EditorCamera() # Allows you to right-click and drag to rotate the camera
+
+
 
 app.run()
